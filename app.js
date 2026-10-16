@@ -4,6 +4,11 @@
  */
 
 // ============================================================================
+// Oletus Cloudflare Worker (Mainokseton striimipurkaja)
+// ============================================================================
+const DEFAULT_CF_WORKER = 'https://purple-bonus-6085.keijohoo.workers.dev';
+
+// ============================================================================
 // Tilanhallinta (State)
 // ============================================================================
 const AppState = {
@@ -14,7 +19,7 @@ const AppState = {
   skipErrors: true,
   currentType: null, // 'youtube' | 'vimeo' | 'html5' | 'iframe'
   serverOnline: false,
-  cfWorkerUrl: localStorage.getItem('agentplayer_cf_worker_url') || '',
+  cfWorkerUrl: localStorage.getItem('agentplayer_cf_worker_url') || DEFAULT_CF_WORKER,
   
   // Soitin-instanssit
   ytPlayer: null,
@@ -1672,26 +1677,26 @@ function initEventListeners() {
   if (DOM.btnSaveCf) {
     DOM.btnSaveCf.addEventListener('click', () => {
       const val = (DOM.inputCfWorkerUrl ? DOM.inputCfWorkerUrl.value : '').trim();
-      AppState.cfWorkerUrl = val;
+      AppState.cfWorkerUrl = val || DEFAULT_CF_WORKER;
       try {
-        localStorage.setItem('agentplayer_cf_worker_url', val);
+        localStorage.setItem('agentplayer_cf_worker_url', AppState.cfWorkerUrl);
       } catch (_) {}
       closeCfModal();
       checkServerStatus();
-      showNextToast(val ? '☁️ Cloudflare Worker yhdistetty!' : 'Cloudflare Worker -osoite tyhjennetty.');
+      showNextToast('☁️ Cloudflare Worker yhdistetty!');
     });
   }
 
   if (DOM.btnClearCf) {
     DOM.btnClearCf.addEventListener('click', () => {
-      AppState.cfWorkerUrl = '';
-      if (DOM.inputCfWorkerUrl) DOM.inputCfWorkerUrl.value = '';
+      AppState.cfWorkerUrl = DEFAULT_CF_WORKER;
+      if (DOM.inputCfWorkerUrl) DOM.inputCfWorkerUrl.value = DEFAULT_CF_WORKER;
       try {
         localStorage.removeItem('agentplayer_cf_worker_url');
       } catch (_) {}
       closeCfModal();
       checkServerStatus();
-      showNextToast('Cloudflare Worker -yhteys poistettu.');
+      showNextToast('Palautettu oletus Cloudflare Worker.');
     });
   }
 
