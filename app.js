@@ -171,7 +171,7 @@ async function resolveInvidiousStream(ytId) {
     try {
       const cleanUrl = AppState.cfWorkerUrl.replace(/\/+$/, '');
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
       const res = await fetch(`${cleanUrl}/api/resolve?id=${encodeURIComponent(ytId)}`, {
         signal: controller.signal
       });
@@ -1444,16 +1444,23 @@ function initEventListeners() {
   DOM.html5Video.addEventListener('error', async () => {
     const currentItem = AppState.playlist[AppState.currentIndex];
 
-    // Jos suora YouTube-striimi vanhentui tai estettiin, siirrytään saumattomasti viralliseen YouTube-soittimeen
+    // Jos suora YouTube-striimi vanhentui tai estettiin, yritetään ensin kerran virkistää striimi Workerilta
     if (currentItem && currentItem.sourceId && /youtu\.?be/i.test(currentItem.originalUrl || currentItem.url)) {
-      console.log('[FALLBACK] Direct stream failed or expired. Falling back to YouTube IFrame player...');
-      showNextToast('Striimi vanhentui – siirrytään YouTube-soittimeen');
-      DOM.hudBadge.textContent = 'YOUTUBE';
-      DOM.hudBadge.className = 'badge badge-yt';
-      activatePlayerElement('youtube');
-      if (AppState.ytReady && window.YT) {
-        initYouTubePlayer(currentItem.sourceId);
+      if (!currentItem._streamRetry) {
+        currentItem._streamRetry = true;
+        console.log('[STREAM] Striimi vanhentui tai katkesi. Haetaan uusi suora striimilinkki Workerilta...');
+        showStatus('Virkistetään videolinkkiä...');
+        try {
+          const fresh = await resolveInvidiousStream(currentItem.sourceId);
+          if (fresh && fresh.streamUrl) {
+            initHtml5Video(fresh.streamUrl, fresh.type === 'hls');
+            return;
+          }
+        } catch (_) {}
       }
+
+      console.warn('[FALLBACK] Suoraa striimiä ei voitu toistaa ilman mainoksia.');
+      handleVideoError('Suora videotoisto epäonnistui.');
       return;
     }
 
