@@ -561,9 +561,23 @@ function initHtml5Video(url, isHls = false) {
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
       video.play().catch(e => console.log('Autoplay requires user interaction:', e));
     });
-    hls.on(Hls.Events.ERROR, (event, data) => {
+    hls.on(Hls.Events.ERROR, async (event, data) => {
       if (data.fatal) {
         console.error('HLS error:', data);
+        const currentItem = AppState.playlist[AppState.currentIndex];
+        if (currentItem && !currentItem._hlsRecoverTried) {
+          currentItem._hlsRecoverTried = true;
+          delete currentItem._resolvedStream;
+          console.log('[RECOVERY] HLS-virhe havaittu. Haetaan suora MP4-videovirta...');
+          showStatus('Vaihdetaan suoraan MP4-videoon...');
+          try {
+            const fresh = await resolveInvidiousStream(currentItem.sourceId);
+            if (fresh && fresh.streamUrl) {
+              initHtml5Video(fresh.streamUrl, false);
+              return;
+            }
+          } catch (_) {}
+        }
         handleVideoError('Error playing HLS stream.');
       }
     });
@@ -653,6 +667,10 @@ async function playVideoAtIndex(index) {
     try {
       // Käytetään valmiiksi esiladattua striimiä jos sellainen on taustalla jo haettu
       let invStream = item._resolvedStream;
+      if (invStream && invStream.type === 'hls') {
+        invStream = null;
+        delete item._resolvedStream;
+      }
       if (!invStream) {
         invStream = await resolveInvidiousStream(item.sourceId);
       }
@@ -719,6 +737,9 @@ async function preloadNextVideo() {
 
   const nextItem = AppState.playlist[nextIndex];
   if (!nextItem || nextItem.type !== 'youtube') return;
+  if (nextItem._resolvedStream && nextItem._resolvedStream.type === 'hls') {
+    delete nextItem._resolvedStream;
+  }
   if (nextItem._resolvedStream || nextItem._isPreloading) return;
 
   nextItem._isPreloading = true;
