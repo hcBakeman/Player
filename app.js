@@ -651,7 +651,11 @@ async function playVideoAtIndex(index) {
   if (item.type === 'youtube') {
     showStatus('Ladataan videota...');
     try {
-      const invStream = await resolveInvidiousStream(item.sourceId);
+      // Käytetään valmiiksi esiladattua striimiä jos sellainen on taustalla jo haettu
+      let invStream = item._resolvedStream;
+      if (!invStream) {
+        invStream = await resolveInvidiousStream(item.sourceId);
+      }
       if (AppState.currentIndex === currentReqIndex && invStream && invStream.streamUrl) {
         console.log('[STREAM] Videovirta ladattu! Toistetaan HTML5-soittimella.');
         DOM.hudBadge.textContent = 'YOUTUBE';
@@ -664,6 +668,9 @@ async function playVideoAtIndex(index) {
         activatePlayerElement('mp4');
         initHtml5Video(invStream.streamUrl, invStream.type === 'hls');
         resetHudAutoHide();
+
+        // Käynnistetään heti seuraavan kappaleen esilataus taustalla!
+        preloadNextVideo();
         return;
       }
     } catch (err) {
@@ -678,17 +685,68 @@ async function playVideoAtIndex(index) {
   } else if (item.type === 'vimeo') {
     activatePlayerElement('vimeo');
     initVimeoPlayer(item.sourceId);
+    preloadNextVideo();
   } else if (item.type === 'hls') {
     activatePlayerElement('mp4');
     initHtml5Video(item.url, true);
+    preloadNextVideo();
   } else {
     // MP4 tai muu suora videotiedosto
     activatePlayerElement('mp4');
     initHtml5Video(item.url, false);
+    preloadNextVideo();
   }
 
   // Varmistetaan että koko ruutu säilyy
   resetHudAutoHide();
+}
+
+/**
+ * Älykäs tausta-esilataus: hakee seuraavan videon striimitiedot taustalla
+ * edellisen soidessa, jotta siirtymä seuraavaan on välitön ilman 15-20s odotusta.
+ */
+async function preloadNextVideo() {
+  if (!AppState.playlist || AppState.playlist.length <= 1) return;
+
+  let nextIndex = AppState.currentIndex + 1;
+  if (nextIndex >= AppState.playlist.length) {
+    if (AppState.isLooping) {
+      nextIndex = 0;
+    } else {
+      return;
+    }
+  }
+
+  const nextItem = AppState.playlist[nextIndex];
+  if (!nextItem || nextItem.type !== 'youtube') return;
+  if (nextItem._resolvedStream || nextItem._isPreloading) return;
+
+  nextItem._isPreloading = true;
+  console.log(`[PRELOAD] Esiladataan seuraava video taustalla (${nextIndex + 1}/${AppState.playlist.length}): ${nextItem.title || nextItem.sourceId}...`);
+
+  try {
+    const res = await resolveInvidiousStream(nextItem.sourceId);
+    if (res && res.streamUrl) {
+      nextItem._resolvedStream = res;
+      if (res.title && (nextItem.title.startsWith('YouTube Video') || nextItem.title === 'Video')) {
+        nextItem.title = res.title;
+        updatePlaylistUI();
+      }
+      console.log(`[PRELOAD] Seuraava video (${nextItem.title}) on esiladattu ja valmiina!`);
+
+      // Esilämmitetään yhteys Workerin ja CDN:n välille
+      try {
+        fetch(res.streamUrl, {
+          method: 'GET',
+          headers: { 'Range': 'bytes=0-4096' }
+        }).catch(() => {});
+      } catch (_) {}
+    }
+  } catch (err) {
+    console.warn('[PRELOAD] Taustalataus epäonnistui:', err);
+  } finally {
+    nextItem._isPreloading = false;
+  }
 }
 
 /**
@@ -700,15 +758,19 @@ function playNextVideo() {
   const nextIndex = AppState.currentIndex + 1;
 
   if (nextIndex < AppState.playlist.length) {
-    showNextToast(`Next video (${nextIndex + 1}/${AppState.playlist.length}): ${AppState.playlist[nextIndex].title}`);
+    const nextItem = AppState.playlist[nextIndex];
+    const isPreloaded = !!(nextItem && nextItem._resolvedStream);
+    showNextToast(`Next (${nextIndex + 1}/${AppState.playlist.length}): ${nextItem.title || 'Video'}`);
     setTimeout(() => {
       playVideoAtIndex(nextIndex);
-    }, 800);
+    }, isPreloaded ? 150 : 800);
   } else if (AppState.isLooping) {
+    const firstItem = AppState.playlist[0];
+    const isPreloaded = !!(firstItem && firstItem._resolvedStream);
     showNextToast('Looping playlist from start!');
     setTimeout(() => {
       playVideoAtIndex(0);
-    }, 1000);
+    }, isPreloaded ? 150 : 1000);
   } else {
     // Playlist finished
     showStatus('All videos played!');
@@ -825,6 +887,11 @@ function renderProgress(currentTime, duration) {
     DOM.hudDuration.textContent = formatTime(duration);
     const percent = Math.min(100, Math.max(0, (currentTime / duration) * 100));
     DOM.hudProgressBar.style.width = `${percent}%`;
+
+    // Varmistetaan että seuraava kappale on esiladattu taustalla
+    if (currentTime > 4 && AppState.playlist && AppState.playlist.length > 1) {
+      preloadNextVideo();
+    }
   } else {
     DOM.hudDuration.textContent = '--:--';
   }

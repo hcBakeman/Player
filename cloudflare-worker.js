@@ -6,8 +6,8 @@
  * täysin ilman mainoksia suoraan selaimen omalla HTML5 <video> -elementillä
  * GitHub Pagesin kautta ilman paikallista server.py -palvelinta.
  * 
- * Sisältää suoran VisionOS Innertube -purkajan virallisen visitor_id API:n kautta
- * sekä HLS (.m3u8) soittolistojen dynaamisen proxauksen.
+ * Sisältää suoran VisionOS Innertube -purkajan, rinnakkaisen Invidious-haun
+ * sekä Cloudflaren reunavälimuistin (Cache API) salamannopeita toistoja varten.
  * 
  * Ilmainen Cloudflare-tili: 100 000 pyyntöä / päivä (ei vaadi luottokorttia).
  */
@@ -23,8 +23,11 @@ const INNERTUBE_API_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8';
 
 async function getVisitorId() {
   try {
+    const controller = new AbortController();
+    const tid = setTimeout(() => controller.abort(), 3500);
     const res = await fetch('https://www.youtube.com/youtubei/v1/visitor_id', {
       method: 'POST',
+      signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
@@ -40,6 +43,7 @@ async function getVisitorId() {
         }
       })
     });
+    clearTimeout(tid);
     if (res.ok) {
       const data = await res.json();
       return data.responseContext?.visitorData || null;
@@ -62,7 +66,7 @@ export default {
       return new Response(JSON.stringify({
         status: 'online',
         service: 'Agent Player Cloudflare Stream Worker',
-        features: ['visionos-visitor-api', 'hls-proxy', 'invidious-fallback'],
+        features: ['visionos-visitor-api', 'parallel-fallback', 'edge-cache', 'hls-proxy'],
         timestamp: new Date().toISOString()
       }), {
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' }
@@ -157,8 +161,16 @@ export default {
 
       const workerOrigin = url.origin;
 
+      // Tarkistetaan Cloudflaren reunavälimuisti (välitön vastaus ~10ms aiemmin puretuille)
+      const cache = caches.default;
+      const cacheKey = new Request(url.toString(), request);
+      try {
+        const cached = await cache.match(cacheKey);
+        if (cached) return cached;
+      } catch (_) {}
+
       // =========================================================================
-      // TIER 1: Suora YouTube VisionOS Innertube -purkaja visitor_id API:n avulla
+      // TIER 1: Suora VisionOS Innertube -purkaja visitor_id API:n avulla
       // =========================================================================
       try {
         const visitorData = await getVisitorId();
@@ -200,11 +212,16 @@ export default {
           headers['X-Goog-Visitor-Id'] = visitorData;
         }
 
+        const controller = new AbortController();
+        const tid = setTimeout(() => controller.abort(), 4500);
+
         const playerRes = await fetch(`https://www.youtube.com/youtubei/v1/player?key=${INNERTUBE_API_KEY}&prettyPrint=false`, {
           method: 'POST',
           headers: headers,
-          body: JSON.stringify(innertubeBody)
+          body: JSON.stringify(innertubeBody),
+          signal: controller.signal
         });
+        clearTimeout(tid);
 
         if (playerRes.ok) {
           const pData = await playerRes.json();
@@ -214,7 +231,7 @@ export default {
             const thumbnail = pData.videoDetails?.thumbnail?.thumbnails?.slice(-1)[0]?.url || `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
             const proxiedHls = `${workerOrigin}/stream?url=${encodeURIComponent(pData.streamingData.hlsManifestUrl)}`;
 
-            return new Response(JSON.stringify({
+            const payload = {
               success: true,
               videoId: videoId,
               title: title,
@@ -223,51 +240,83 @@ export default {
               streamUrl: proxiedHls,
               type: 'hls',
               source: 'youtube-visionos'
-            }), {
-              headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' }
+            };
+
+            const successRes = new Response(JSON.stringify(payload), {
+              headers: {
+                ...CORS_HEADERS,
+                'Content-Type': 'application/json',
+                'Cache-Control': 'public, max-age=7200'
+              }
             });
+            try { ctx.waitUntil(cache.put(cacheKey, successRes.clone())); } catch (_) {}
+            return successRes;
           }
         }
       } catch (_) {
-        // Siirrytään Invidious-varavaihtoehtoon
+        // Siirrytään rinnakkaiseen Invidious-varajärjestelmään
       }
 
       // =========================================================================
-      // TIER 2: Invidious API -varajärjestelmä
+      // TIER 2: Rinnakkainen Invidious-varajärjestelmä (kilpailutetaan nopein)
       // =========================================================================
       const backupInstances = [
         'https://invidious.f5.si',
-        'https://inv.nadeko.net',
-        'https://invidious.nerdvpn.de'
+        'https://invidious.nerdvpn.de',
+        'https://inv.nadeko.net'
       ];
 
-      for (const inst of backupInstances) {
+      const fetchCandidate = async (inst) => {
+        const controller = new AbortController();
+        const tid = setTimeout(() => controller.abort(), 6000);
         try {
           const invRes = await fetch(`${inst}/api/v1/videos/${videoId}`, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
-            cf: { cacheTtl: 3600 }
+            signal: controller.signal
           });
+          clearTimeout(tid);
           if (invRes.ok) {
             const data = await invRes.json();
             const format = (data.formatStreams || []).find(f => f.container === 'mp4' && f.url);
             if (format && format.url) {
-              const proxiedUrl = `${workerOrigin}/stream?url=${encodeURIComponent(format.url)}`;
-              return new Response(JSON.stringify({
-                success: true,
-                videoId: videoId,
+              return {
                 title: data.title || 'YouTube Video',
                 duration: data.lengthSeconds || 0,
                 thumbnail: data.videoThumbnails?.[0]?.url || `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
-                streamUrl: proxiedUrl,
+                streamUrl: `${workerOrigin}/stream?url=${encodeURIComponent(format.url)}`,
                 type: 'mp4',
                 source: inst
-              }), {
-                headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' }
-              });
+              };
             }
           }
         } catch (_) {}
-      }
+        throw new Error('Failed');
+      };
+
+      try {
+        const winner = await Promise.any(backupInstances.map(fetchCandidate));
+        if (winner) {
+          const successPayload = {
+            success: true,
+            videoId: videoId,
+            title: winner.title,
+            duration: winner.duration,
+            thumbnail: winner.thumbnail,
+            streamUrl: winner.streamUrl,
+            type: winner.type,
+            source: winner.source
+          };
+          const successRes = new Response(JSON.stringify(successPayload), {
+            headers: {
+              ...CORS_HEADERS,
+              'Content-Type': 'application/json',
+              'Cache-Control': 'public, max-age=7200'
+            }
+          });
+          try { ctx.waitUntil(cache.put(cacheKey, successRes.clone())); } catch (_) {}
+          return successRes;
+        }
+      } catch (_) {}
 
       // Jos kaikki purkajat epäonnistuivat
       return new Response(JSON.stringify({
