@@ -129,6 +129,119 @@ const DEMO_PLAYLIST = [
 ];
 
 // ============================================================================
+// Invidious API - Mainokseton suorastriimi & soittolistapurkaja
+// ============================================================================
+const INVIDIOUS_INSTANCES = [
+  'https://invidious.f5.si',
+  'https://inv.nadeko.net',
+  'https://invidious.nerdvpn.de'
+];
+
+function extractYouTubeId(url) {
+  if (!url) return null;
+  const match = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/))([\w-]{11})/i);
+  return match ? match[1] : null;
+}
+
+function extractYouTubePlaylistId(url) {
+  if (!url) return null;
+  const match = url.match(/[?&]list=([a-zA-Z0-9_-]+)/i);
+  return match ? match[1] : null;
+}
+
+async function resolveInvidiousStream(ytId) {
+  if (!ytId) return null;
+  for (const instance of INVIDIOUS_INSTANCES) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const res = await fetch(`${instance}/api/v1/videos/${encodeURIComponent(ytId)}`, {
+        signal: controller.signal,
+        headers: { 'Accept': 'application/json' }
+      });
+      clearTimeout(timeoutId);
+
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (!data) continue;
+
+      let chosenStream = null;
+      if (Array.isArray(data.formatStreams) && data.formatStreams.length > 0) {
+        const mp4Streams = data.formatStreams.filter(s => s.container === 'mp4' && s.url);
+        if (mp4Streams.length > 0) {
+          chosenStream = mp4Streams[0];
+        }
+      }
+
+      if (!chosenStream && data.hlsUrl) {
+        return {
+          success: true,
+          streamUrl: data.hlsUrl,
+          title: data.title || '',
+          duration: data.lengthSeconds || 0,
+          type: 'hls',
+          thumbnail: (data.videoThumbnails && data.videoThumbnails[0]) ? data.videoThumbnails[0].url : `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`,
+          instance: instance
+        };
+      }
+
+      if (chosenStream && chosenStream.url) {
+        return {
+          success: true,
+          streamUrl: chosenStream.url,
+          title: data.title || '',
+          duration: data.lengthSeconds || 0,
+          type: 'mp4',
+          thumbnail: (data.videoThumbnails && data.videoThumbnails[0]) ? data.videoThumbnails[0].url : `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`,
+          instance: instance
+        };
+      }
+    } catch (e) {
+      console.warn(`[INVIDIOUS] Instance ${instance} request failed:`, e);
+    }
+  }
+  return null;
+}
+
+async function resolveInvidiousPlaylist(playlistId) {
+  if (!playlistId) return null;
+  for (const instance of INVIDIOUS_INSTANCES) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(`${instance}/api/v1/playlists/${encodeURIComponent(playlistId)}`, {
+        signal: controller.signal,
+        headers: { 'Accept': 'application/json' }
+      });
+      clearTimeout(timeoutId);
+
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (data && Array.isArray(data.videos) && data.videos.length > 0) {
+        return {
+          success: true,
+          title: data.title || 'YouTube Soittolista',
+          count: data.videos.length,
+          items: data.videos.map(v => ({
+            url: `https://www.youtube.com/watch?v=${v.videoId}`,
+            originalUrl: `https://www.youtube.com/watch?v=${v.videoId}`,
+            title: v.title || 'Video',
+            duration: v.lengthSeconds || 0,
+            type: 'youtube',
+            sourceId: v.videoId,
+            badgeText: 'YOUTUBE',
+            badgeClass: 'badge-yt'
+          }))
+        };
+      }
+    } catch (e) {
+      console.warn(`[INVIDIOUS] Playlist request failed on ${instance}:`, e);
+    }
+  }
+  return null;
+}
+
+// ============================================================================
 // URL-tunnistus ja parsinta
 // ============================================================================
 function detectVideoSource(rawUrl) {
@@ -461,7 +574,7 @@ function activatePlayerElement(type) {
 // ============================================================================
 // Soittolistan toistologiikka (Queue & Autoplay)
 // ============================================================================
-function playVideoAtIndex(index) {
+async function playVideoAtIndex(index) {
   if (index < 0 || index >= AppState.playlist.length) {
     console.warn('Indeksi soittolistan ulkopuolella:', index);
     return;
@@ -469,6 +582,7 @@ function playVideoAtIndex(index) {
 
   clearTimeout(AppState.errorSkipTimeout);
   AppState.currentIndex = index;
+  const currentReqIndex = index;
   const item = AppState.playlist[index];
 
   DOM.idleScreen.classList.add('hidden');
@@ -488,6 +602,33 @@ function playVideoAtIndex(index) {
 
   // Käynnistä oikea soitin
   if (item.type === 'youtube') {
+    showStatus('Haetaan mainokseton videostriimi...');
+    try {
+      const invStream = await resolveInvidiousStream(item.sourceId);
+      if (AppState.currentIndex === currentReqIndex && invStream && invStream.streamUrl) {
+        console.log('[AD-FREE] Mainokseton Invidious-videovirta ladattu! Toistetaan HTML5-soittimella.');
+        DOM.hudBadge.textContent = 'MAINOKSETON MP4';
+        DOM.hudBadge.className = 'badge badge-mp4';
+        if (invStream.title && (item.title.startsWith('YouTube Video') || item.title === 'Video')) {
+          item.title = invStream.title;
+          DOM.hudTitle.textContent = item.title;
+          updatePlaylistUI();
+        }
+        activatePlayerElement('mp4');
+        initHtml5Video(invStream.streamUrl, invStream.type === 'hls');
+        resetHudAutoHide();
+        return;
+      }
+    } catch (err) {
+      console.warn('Invidious stream fetch failed:', err);
+    }
+
+    if (AppState.currentIndex !== currentReqIndex) return;
+
+    // Fallback: Virallinen YouTube IFrame -soitin
+    console.log('[FALLBACK] Siirrytään viralliseen YouTube IFrame -soittimeen');
+    DOM.hudBadge.textContent = 'YOUTUBE';
+    DOM.hudBadge.className = 'badge badge-yt';
     activatePlayerElement('youtube');
     if (AppState.ytReady && window.YT) {
       initYouTubePlayer(item.sourceId);
@@ -496,7 +637,9 @@ function playVideoAtIndex(index) {
       const checkYt = setInterval(() => {
         if (AppState.ytReady && window.YT) {
           clearInterval(checkYt);
-          initYouTubePlayer(item.sourceId);
+          if (AppState.currentIndex === currentReqIndex) {
+            initYouTubePlayer(item.sourceId);
+          }
         }
       }, 200);
       setTimeout(() => clearInterval(checkYt), 5000);
@@ -1031,14 +1174,26 @@ function stopAllPlayback() {
 
 async function checkServerStatus() {
   const dot = DOM.serverStatusPill ? DOM.serverStatusPill.querySelector('.status-dot') : null;
+  const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+  if (!isLocal) {
+    // Ollaan GitHub Pagesissa tai verkossa
+    AppState.serverOnline = false;
+    if (dot) dot.className = 'status-dot online';
+    if (DOM.serverStatusLabel) {
+      DOM.serverStatusLabel.textContent = 'Ad-Free Web Mode';
+    }
+    return false;
+  }
+
   try {
-    const res = await fetch('/api/status', { cache: 'no-store', signal: AbortSignal.timeout(3000) });
+    const res = await fetch('/api/status', { cache: 'no-store', signal: AbortSignal.timeout(2000) });
     if (res.ok) {
       const data = await res.json();
       AppState.serverOnline = true;
       if (dot) dot.className = 'status-dot online';
       if (DOM.serverStatusLabel) {
-        DOM.serverStatusLabel.textContent = 'Palvelin: Online (1800+ sivustoa)';
+        DOM.serverStatusLabel.textContent = 'Server: Online (yt-dlp)';
       }
       return true;
     }
@@ -1047,7 +1202,7 @@ async function checkServerStatus() {
   AppState.serverOnline = false;
   if (dot) dot.className = 'status-dot offline';
   if (DOM.serverStatusLabel) {
-    DOM.serverStatusLabel.textContent = 'Palvelin: Offline (Käynnistä start.bat)';
+    DOM.serverStatusLabel.textContent = 'Local Server: Offline';
   }
   return false;
 }
@@ -1062,47 +1217,62 @@ async function addVideoToPlaylist(url, customTitle = '') {
     /vimeo\.com/i.test(url)
   );
 
-  const isPlaylist = /list=|playlist/i.test(url);
+  const ytPlaylistId = extractYouTubePlaylistId(url);
+  const isPlaylist = Boolean(ytPlaylistId) || /list=|playlist/i.test(url);
   showStatus(isPlaylist ? 'Extracting playlist tracks...' : 'Checking video link...');
 
-  // Yritetään palvelimen purkua
+  // 1. Jos taustapalvelin on aktiivisena, käytetään paikallista yt-dlp:tä
   let resolvedData = null;
-  try {
-    const res = await fetch(`/api/resolve?url=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(25000) });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.success) {
-        if (data.isPlaylist && Array.isArray(data.items) && data.items.length > 0) {
-          // Monivideo-soittolista (esim. YouTube Playlist)
-          data.items.forEach(it => {
-            AppState.playlist.push({
-              url: it.url,
-              originalUrl: it.url,
-              title: it.title || 'Video',
-              type: it.type || 'youtube',
-              sourceId: it.sourceId || it.url,
-              badgeText: it.badgeText || 'YOUTUBE',
-              badgeClass: it.badgeClass || 'badge-yt',
-              duration: it.duration || 0
+  if (AppState.serverOnline) {
+    try {
+      const res = await fetch(`/api/resolve?url=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(25000) });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          if (data.isPlaylist && Array.isArray(data.items) && data.items.length > 0) {
+            data.items.forEach(it => {
+              AppState.playlist.push({
+                url: it.url,
+                originalUrl: it.url,
+                title: it.title || 'Video',
+                type: it.type || 'youtube',
+                sourceId: it.sourceId || it.url,
+                badgeText: it.badgeText || 'YOUTUBE',
+                badgeClass: it.badgeClass || 'badge-yt',
+                duration: it.duration || 0
+              });
             });
-          });
 
-          savePlaylistToStorage();
-          renderPlaylist();
-          hideStatus();
-          showNextToast(`✨ Added playlist: "${data.playlistTitle || 'YouTube'}" (${data.count} items)!`);
-          return data.items[0];
-        } else if (data.streamUrl) {
-          resolvedData = data;
+            savePlaylistToStorage();
+            renderPlaylist();
+            hideStatus();
+            showNextToast(`✨ Added playlist: "${data.playlistTitle || 'YouTube'}" (${data.count} items)!`);
+            return data.items[0];
+          } else if (data.streamUrl) {
+            resolvedData = data;
+          }
         }
       }
+    } catch (e) {
+      console.log('Server query failed:', e);
     }
-  } catch (e) {
-    console.log('Server query failed:', e);
+  }
+
+  // 2. Jos palvelin ei ole päällä ja kyseessä on YouTube-soittolista -> Invidious API
+  if (!resolvedData && ytPlaylistId) {
+    showStatus('Fetching YouTube playlist (Invidious API)...');
+    const plData = await resolveInvidiousPlaylist(ytPlaylistId);
+    if (plData && plData.items && plData.items.length > 0) {
+      plData.items.forEach(it => AppState.playlist.push(it));
+      savePlaylistToStorage();
+      renderPlaylist();
+      hideStatus();
+      showNextToast(`✨ Added playlist: "${plData.title}" (${plData.count} items)!`);
+      return plData.items[0];
+    }
   }
 
   if (resolvedData) {
-    // Purettu onnistuneesti suora videostriimi palvelimelta!
     const isHls = resolvedData.type === 'hls' || resolvedData.streamUrl.includes('.m3u8');
     const badgeText = resolvedData.extractor ? resolvedData.extractor.toUpperCase() : (isHls ? 'HLS' : 'MP4');
     const badgeClass = resolvedData.extractor ? 'badge-tube' : (isHls ? 'badge-hls' : 'badge-mp4');
@@ -1127,12 +1297,11 @@ async function addVideoToPlaylist(url, customTitle = '') {
     return newItem;
   }
 
-  // Fallback asiakaspään tunnistukseen
+  // 3. Fallback asiakaspään tunnistukseen
   const parsed = detectVideoSource(url);
 
-  // Jos kyseessä on ulkopuolinen sivusto ja palvelin ei ollut tavoitettavissa
   if (!isDirectOrStandard && !AppState.serverOnline) {
-    alert(`⚠️ Note: This link requires the local background server to resolve direct video streams.\n\nRun "start.bat" and open http://localhost:8080.`);
+    alert(`⚠️ Note: This link requires the local background server (start.bat / server.py) to resolve direct video streams.`);
   }
 
   let finalTitle = customTitle.trim();
@@ -1164,6 +1333,7 @@ async function addVideoToPlaylist(url, customTitle = '') {
   savePlaylistToStorage();
   renderPlaylist();
   hideStatus();
+  showNextToast(`Added: ${newItem.title}`);
   return newItem;
 }
 
@@ -1226,6 +1396,20 @@ function initEventListeners() {
 
   DOM.html5Video.addEventListener('error', async () => {
     const currentItem = AppState.playlist[AppState.currentIndex];
+
+    // Jos suora YouTube-striimi vanhentui tai estettiin, siirrytään saumattomasti viralliseen YouTube-soittimeen
+    if (currentItem && currentItem.sourceId && /youtu\.?be/i.test(currentItem.originalUrl || currentItem.url)) {
+      console.log('[FALLBACK] Direct stream failed or expired. Falling back to YouTube IFrame player...');
+      showNextToast('Striimi vanhentui – siirrytään YouTube-soittimeen');
+      DOM.hudBadge.textContent = 'YOUTUBE';
+      DOM.hudBadge.className = 'badge badge-yt';
+      activatePlayerElement('youtube');
+      if (AppState.ytReady && window.YT) {
+        initYouTubePlayer(currentItem.sourceId);
+      }
+      return;
+    }
+
     if (currentItem && currentItem.originalUrl && currentItem.originalUrl !== currentItem.url && AppState.serverOnline) {
       console.log('Stream link expired or invalid, refreshing stream from server...');
       showStatus('Refreshing stream link from server...');
@@ -1471,8 +1655,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   await checkServerStatus();
   loadPlaylistFromStorage();
 
-  // Tarkistetaan taustapalvelin säännöllisesti
-  setInterval(checkServerStatus, 10000);
+  // Tarkistetaan taustapalvelin säännöllisesti jos ollaan localhostissa
+  const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  if (isLocal) {
+    setInterval(checkServerStatus, 10000);
+  }
 
   // Jos soittolista on tyhjä, alustetaan esimerkkilista
   if (AppState.playlist.length === 0) {
