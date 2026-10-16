@@ -14,6 +14,7 @@ const AppState = {
   skipErrors: true,
   currentType: null, // 'youtube' | 'vimeo' | 'html5' | 'iframe'
   serverOnline: false,
+  cfWorkerUrl: localStorage.getItem('agentplayer_cf_worker_url') || '',
   
   // Soitin-instanssit
   ytPlayer: null,
@@ -94,7 +95,15 @@ const DOM = {
   bulkTextarea: document.getElementById('bulk-textarea'),
   btnConfirmBulk: document.getElementById('btn-confirm-bulk'),
   btnCancelBulk: document.getElementById('btn-cancel-bulk'),
-  btnCloseModal: document.getElementById('btn-close-modal')
+  btnCloseModal: document.getElementById('btn-close-modal'),
+
+  // Cloudflare Proxy -modaali
+  btnCfSettings: document.getElementById('btn-cf-settings'),
+  cfModal: document.getElementById('cf-modal'),
+  inputCfWorkerUrl: document.getElementById('input-cf-worker-url'),
+  btnSaveCf: document.getElementById('btn-save-cf'),
+  btnClearCf: document.getElementById('btn-clear-cf'),
+  btnCloseCfModal: document.getElementById('btn-close-cf-modal')
 };
 
 // ============================================================================
@@ -151,6 +160,39 @@ function extractYouTubePlaylistId(url) {
 
 async function resolveInvidiousStream(ytId) {
   if (!ytId) return null;
+
+  // 1. Ensisijainen: Käyttäjän oma Cloudflare Worker (100% ad-free & unblocked)
+  if (AppState.cfWorkerUrl) {
+    try {
+      const cleanUrl = AppState.cfWorkerUrl.replace(/\/+$/, '');
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(`${cleanUrl}/api/resolve?id=${encodeURIComponent(ytId)}`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.success && data.streamUrl) {
+          console.log('[CLOUDFLARE] Mainokseton striimi ladattu omalta Workerilta!');
+          return {
+            success: true,
+            streamUrl: data.streamUrl,
+            title: data.title || '',
+            duration: data.duration || 0,
+            type: data.type || 'mp4',
+            thumbnail: data.thumbnail || `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`,
+            instance: 'Cloudflare Worker'
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('[CLOUDFLARE] Worker-pyyntö epäonnistui, kokeillaan julkisia palvelimia:', e);
+    }
+  }
+
+  // 2. Toissijainen: Julkiset Invidious-instanssit
   for (const instance of INVIDIOUS_INSTANCES) {
     try {
       const controller = new AbortController();
@@ -1181,9 +1223,9 @@ async function checkServerStatus() {
     AppState.serverOnline = false;
     if (dot) dot.className = 'status-dot online';
     if (DOM.serverStatusLabel) {
-      DOM.serverStatusLabel.textContent = 'Ad-Free Web Mode';
+      DOM.serverStatusLabel.textContent = AppState.cfWorkerUrl ? 'Cloudflare Proxy Online' : 'Ad-Free Web Mode';
     }
-    return false;
+    return Boolean(AppState.cfWorkerUrl);
   }
 
   try {
@@ -1610,6 +1652,48 @@ function initEventListeners() {
       }
     }
   });
+
+  // Cloudflare Proxy -modaali
+  if (DOM.btnCfSettings) {
+    DOM.btnCfSettings.addEventListener('click', () => {
+      if (DOM.inputCfWorkerUrl) {
+        DOM.inputCfWorkerUrl.value = AppState.cfWorkerUrl || '';
+      }
+      if (DOM.cfModal) {
+        DOM.cfModal.classList.remove('hidden');
+        if (DOM.inputCfWorkerUrl) DOM.inputCfWorkerUrl.focus();
+      }
+    });
+  }
+
+  const closeCfModal = () => DOM.cfModal && DOM.cfModal.classList.add('hidden');
+  if (DOM.btnCloseCfModal) DOM.btnCloseCfModal.addEventListener('click', closeCfModal);
+
+  if (DOM.btnSaveCf) {
+    DOM.btnSaveCf.addEventListener('click', () => {
+      const val = (DOM.inputCfWorkerUrl ? DOM.inputCfWorkerUrl.value : '').trim();
+      AppState.cfWorkerUrl = val;
+      try {
+        localStorage.setItem('agentplayer_cf_worker_url', val);
+      } catch (_) {}
+      closeCfModal();
+      checkServerStatus();
+      showNextToast(val ? '☁️ Cloudflare Worker yhdistetty!' : 'Cloudflare Worker -osoite tyhjennetty.');
+    });
+  }
+
+  if (DOM.btnClearCf) {
+    DOM.btnClearCf.addEventListener('click', () => {
+      AppState.cfWorkerUrl = '';
+      if (DOM.inputCfWorkerUrl) DOM.inputCfWorkerUrl.value = '';
+      try {
+        localStorage.removeItem('agentplayer_cf_worker_url');
+      } catch (_) {}
+      closeCfModal();
+      checkServerStatus();
+      showNextToast('Cloudflare Worker -yhteys poistettu.');
+    });
+  }
 
   // Näppäinoikotiet (Keyboard Shortcuts)
   document.addEventListener('keydown', (e) => {

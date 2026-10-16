@@ -31,6 +31,9 @@
           <span class="status-dot online"></span>
           <span id="server-status-label">Ad-Free Web Mode</span>
         </div>
+        <button id="btn-cf-settings" class="btn btn-secondary" title="Configure Cloudflare Ad-Free Proxy">
+          <span class="icon">☁️</span> Cloudflare Proxy
+        </button>
         <button id="btn-load-demo" class="btn btn-secondary" title="Load sample demo playlist">
           <span class="icon">✨</span> Demo Playlist
         </button>
@@ -257,6 +260,43 @@
         <div class="modal-footer">
           <button id="btn-cancel-bulk" class="btn btn-secondary">Cancel</button>
           <button id="btn-confirm-bulk" class="btn btn-primary">Add to Playlist</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cloudflare Worker Modal -->
+    <div id="cf-modal" class="modal-overlay hidden">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <h3>☁️ Cloudflare Stream Proxy (Mainokseton Pilvi)</h3>
+          <button id="btn-close-cf-modal" class="btn-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="modal-alert-box">
+            🛡️ <strong>100% Mainokseton YouTube-toisto GitHub Pagesissa:</strong><br>
+            Tämä yhdistää soittimen omaan ilmaiseen Cloudflare Workeriisi, joka poistaa mainokset ja toistaa videot suoraan selaimen omalla HTML5-soittimella.
+          </div>
+          <p style="margin-top: 1rem; margin-bottom: 0.4rem; font-size: 0.88rem; color: var(--text-secondary);">
+            <strong>Cloudflare Worker URL-osoite:</strong>
+          </p>
+          <div class="input-row">
+            <input type="url" id="input-cf-worker-url" placeholder="https://agent-player-proxy.oma-nimi.workers.dev">
+          </div>
+          
+          <div style="margin-top: 1.2rem; padding: 0.85rem; background: rgba(255,255,255,0.03); border-radius: 8px; font-size: 0.83rem; color: var(--text-muted); line-height: 1.6;">
+            <strong style="color: var(--text-main);">Nopea käyttöönotto (2 min, 100 % ilmainen):</strong>
+            <ol style="margin-left: 1.2rem; margin-top: 0.4rem;">
+              <li>Kirjaudu osoitteeseen <a href="https://dash.cloudflare.com" target="_blank" style="color: var(--accent-vimeo); text-decoration: underline;">dash.cloudflare.com</a> (ilmainen tili).</li>
+              <li>Valitse vasemmalta <strong>Compute (Workers &amp; Pages)</strong> &gt; <strong>Create application</strong> &gt; <strong>Create Worker</strong>.</li>
+              <li>Paina <strong>Deploy</strong>, ja sen jälkeen <strong>Edit code</strong>.</li>
+              <li>Liitä <code>cloudflare-worker.js</code> -tiedoston sisältö editoriin ja paina <strong>Deploy</strong>.</li>
+              <li>Kopioi workerin <code>.workers.dev</code> -osoite ja liitä se yllä olevaan kenttään!</li>
+            </ol>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="btn-clear-cf" class="btn btn-secondary">Poista yhteys</button>
+          <button id="btn-save-cf" class="btn btn-primary">Tallenna &amp; Yhdistä</button>
         </div>
       </div>
     </div>
