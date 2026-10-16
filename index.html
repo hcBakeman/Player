@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>Agent Player – Seamless Video Playlist Player</title>
+  <link rel="stylesheet" href="styles.css">
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- HLS.js for .m3u8 streaming support -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <!-- Vimeo Player SDK -->
+  <script src="https://player.vimeo.com/api/player.js"></script>
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo-area">
+        <div class="logo-icon">▶</div>
+        <div class="logo-text">
+          <h1>Agent Player</h1>
+          <p class="subtitle">Continuous autoplay for multiple video sources (YouTube, Vimeo, MP4, HLS)</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="btn-load-demo" class="btn btn-secondary" title="Load sample demo playlist">
+          <span class="icon">✨</span> Demo Playlist
+        </button>
+        <button id="btn-bulk-import" class="btn btn-secondary" title="Paste multiple URLs or playlists at once">
+          <span class="icon">📋</span> Bulk Import
+        </button>
+        <button id="btn-clear-all" class="btn btn-danger-outline" title="Clear entire playlist">
+          <span class="icon">🗑️</span> Clear All
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Content: Left Player, Right Playlist -->
+    <main class="main-content">
+      <!-- Video Player Area -->
+      <section class="player-wrapper">
+        <div id="player-container" class="player-container is-idle">
+          <!-- 1. HTML5 Video (MP4, WebM, HLS) -->
+          <video id="html5-video" class="player-element" playsinline></video>
+
+          <!-- 2. YouTube Player Target -->
+          <div id="youtube-target" class="player-element"></div>
+
+          <!-- 3. Vimeo Player Target -->
+          <div id="vimeo-target" class="player-element"></div>
+
+          <!-- 4. Iframe Fallback Target -->
+          <iframe id="iframe-target" class="player-element" allow="autoplay; fullscreen; encrypted-media" allowfullscreen></iframe>
+
+          <!-- Idle Placeholder -->
+          <div id="player-idle-screen" class="player-idle-screen">
+            <div class="idle-content">
+              <div class="idle-icon">🎬</div>
+              <h2>No Video Playing</h2>
+              <p>Add videos to the playlist and click <strong>"Play Playlist"</strong>.</p>
+              <button id="btn-idle-play" class="btn btn-primary btn-large">
+                <span class="icon">▶</span> Play Playlist
+              </button>
+            </div>
+          </div>
+
+          <!-- Loading & Status Indicator -->
+          <div id="player-status-badge" class="player-status-badge hidden">
+            <span class="status-spinner"></span>
+            <span id="player-status-text">Loading video...</span>
+          </div>
+
+          <!-- Heads-Up Display (HUD) -->
+          <div id="player-hud" class="player-hud">
+            <div class="hud-top">
+              <div class="hud-video-info">
+                <span id="hud-badge" class="badge">MP4</span>
+                <span id="hud-title" class="hud-title">Video Title</span>
+                <span id="hud-index" class="hud-index">(1 / 5)</span>
+              </div>
+            </div>
+
+            <!-- Bottom HUD Bar: Seek bar and Controls -->
+            <div class="hud-bottom-bar">
+              <!-- Seek bar -->
+              <div class="hud-progress-wrapper" id="hud-progress-wrapper" title="Seek video">
+                <div class="hud-progress-bar" id="hud-progress-bar" style="width: 0%;"></div>
+              </div>
+
+              <div class="hud-bottom">
+                <div class="hud-controls-left">
+                  <button id="btn-hud-prev" class="hud-btn" title="Previous video (P)">⏮</button>
+                  <button id="btn-hud-playpause" class="hud-btn hud-play-btn" title="Play / Pause (Space)">▶</button>
+                  <button id="btn-hud-next" class="hud-btn" title="Next video (N)">⏭</button>
+
+                  <!-- Volume Control -->
+                  <div class="hud-volume-control">
+                    <button id="btn-hud-volume" class="hud-btn" title="Mute / Unmute (M)">🔊</button>
+                    <div class="hud-volume-slider-wrapper">
+                      <input type="range" id="hud-volume-slider" class="hud-volume-slider" min="0" max="100" value="100" title="Volume (Up/Down arrows)">
+                    </div>
+                  </div>
+
+                  <div class="hud-time">
+                    <span id="hud-current-time">00:00</span> / <span id="hud-duration">00:00</span>
+                  </div>
+                </div>
+
+                <div class="hud-controls-right">
+                  <button id="btn-hud-loop" class="hud-btn" title="Loop playlist continuously">🔁</button>
+                  <button id="btn-hud-fullscreen" class="hud-btn" title="Full Screen (F)">⛶</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Volume Indicator Toast -->
+            <div id="volume-indicator-toast" class="volume-indicator-toast hidden">
+              <span id="volume-indicator-icon">🔊</span>
+              <span id="volume-indicator-text">100%</span>
+            </div>
+
+            <!-- Autoplay Next Video Toast -->
+            <div id="next-video-toast" class="next-video-toast hidden">
+              <span>Next video starting soon...</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Player Controls Bar -->
+        <div class="player-under-bar">
+          <div class="playback-quick-controls">
+            <button id="btn-play-all" class="btn btn-primary">
+              <span class="icon">▶</span> Play Playlist
+            </button>
+            <button id="btn-fullscreen-toggle" class="btn btn-secondary">
+              <span class="icon">⛶</span> Full Screen
+            </button>
+          </div>
+          <div class="playback-options">
+            <label class="toggle-switch">
+              <input type="checkbox" id="toggle-loop" checked>
+              <span class="switch-slider"></span>
+              <span class="toggle-label">Loop Playlist</span>
+            </label>
+            <label class="toggle-switch" title="Hide video title bar from the screen">
+              <input type="checkbox" id="toggle-hide-title">
+              <span class="switch-slider"></span>
+              <span class="toggle-label">Hide Top Title</span>
+            </label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="toggle-skip-errors" checked>
+              <span class="switch-slider"></span>
+              <span class="toggle-label">Auto-skip Errors</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Keyboard Shortcuts Hint -->
+        <div class="shortcuts-card">
+          <div class="shortcuts-hint">
+            <span class="shortcut-item"><kbd>SPACE</kbd> = Pause</span>
+            <span class="shortcut-divider">•</span>
+            <span class="shortcut-item"><kbd>N</kbd> = Next video</span>
+            <span class="shortcut-divider">•</span>
+            <span class="shortcut-item"><kbd>P</kbd> = Previous video</span>
+            <span class="shortcut-divider">•</span>
+            <span class="shortcut-item"><kbd>↑</kbd>/<kbd>↓</kbd> = Volume</span>
+            <span class="shortcut-divider">•</span>
+            <span class="shortcut-item"><kbd>M</kbd> = Mute</span>
+            <span class="shortcut-divider">•</span>
+            <span class="shortcut-item"><kbd>F</kbd> = Fullscreen</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Column: Playlist Management & Add URL -->
+      <section class="playlist-section">
+        <!-- Add URL Form -->
+        <div class="add-url-card">
+          <h2>Add Video</h2>
+          <form id="form-add-url" class="add-url-form">
+            <div class="input-group">
+              <input 
+                type="url" 
+                id="input-video-url" 
+                placeholder="Paste video or YouTube playlist URL..." 
+                required 
+                autocomplete="off"
+              >
+            </div>
+            <div class="input-row">
+              <input 
+                type="text" 
+                id="input-video-title" 
+                placeholder="Optional title / label" 
+                autocomplete="off"
+              >
+              <button type="submit" class="btn btn-primary">
+                <span class="icon">＋</span> Add
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Playlist -->
+        <div class="playlist-card">
+          <div class="playlist-header">
+            <div class="playlist-title-area">
+              <h2>Playlist</h2>
+              <span id="playlist-count-badge" class="count-badge">0 videos</span>
+            </div>
+            <div class="playlist-meta-actions">
+              <button id="btn-export-list" class="btn-text" title="Export playlist as JSON file">Export</button>
+              <label for="file-import-input" class="btn-text clickable" title="Import playlist from JSON file">Import</label>
+              <input type="file" id="file-import-input" accept=".json" style="display:none">
+            </div>
+          </div>
+
+          <!-- Playlist Items -->
+          <ul id="playlist-items" class="playlist-items">
+            <!-- Dynamically populated via JS -->
+          </ul>
+
+          <div id="empty-playlist-msg" class="empty-playlist-msg">
+            <div class="empty-icon">📂</div>
+            <p>Playlist is empty.</p>
+            <p class="empty-sub">Paste video links above or click <strong>Demo Playlist</strong> to test right away.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Bulk Import Modal -->
+    <div id="bulk-modal" class="modal-overlay hidden">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <h3>Paste Multiple Video URLs</h3>
+          <button id="btn-close-modal" class="btn-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="modal-alert-box">
+            🎵 <strong>YouTube Playlist Support:</strong> You can paste a YouTube playlist URL (e.g. <code>https://www.youtube.com/playlist?list=...</code>). The player will automatically extract and queue every video!
+          </div>
+          <p style="margin-top: 0.85rem; margin-bottom: 0.5rem; font-size: 0.88rem; color: var(--text-secondary);">
+            Paste video or playlist links below, one per line:
+          </p>
+          <textarea id="bulk-textarea" rows="8" placeholder="https://www.youtube.com/playlist?list=PLMX6yEgs2SxHxr2RdFwcp26MvbA99D0uv&#10;https://www.youtube.com/watch?v=...&#10;https://vimeo.com/...&#10;https://commondatastorage.googleapis.com/.../video.mp4"></textarea>
+        </div>
+        <div class="modal-footer">
+          <button id="btn-cancel-bulk" class="btn btn-secondary">Cancel</button>
+          <button id="btn-confirm-bulk" class="btn btn-primary">Add to Playlist</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- YouTube IFrame API Script Loader -->
+  <script>
+    // Lataa YouTube API asynkronisesti
+    var tag = document.createElement('script');
+    tag.src = "https://www.youtube.com/iframe_api";
+    var firstScriptTag = document.getElementsByTagName('script')[0];
+    firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+  </script>
+
+  <!-- Pääsovelluskoodi -->
+  <script src="app.js"></script>
+</body>
+</html>
