@@ -649,13 +649,13 @@ async function playVideoAtIndex(index) {
 
   // Käynnistä oikea soitin
   if (item.type === 'youtube') {
-    showStatus('Haetaan mainokseton videostriimi...');
+    showStatus('Ladataan videota...');
     try {
       const invStream = await resolveInvidiousStream(item.sourceId);
       if (AppState.currentIndex === currentReqIndex && invStream && invStream.streamUrl) {
-        console.log('[AD-FREE] Mainokseton Invidious-videovirta ladattu! Toistetaan HTML5-soittimella.');
-        DOM.hudBadge.textContent = 'MAINOKSETON MP4';
-        DOM.hudBadge.className = 'badge badge-mp4';
+        console.log('[STREAM] Videovirta ladattu! Toistetaan HTML5-soittimella.');
+        DOM.hudBadge.textContent = 'YOUTUBE';
+        DOM.hudBadge.className = 'badge badge-yt';
         if (invStream.title && (item.title.startsWith('YouTube Video') || item.title === 'Video')) {
           item.title = invStream.title;
           DOM.hudTitle.textContent = item.title;
