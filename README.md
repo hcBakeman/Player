@@ -1,81 +1,72 @@
-# Agent Player – Saumaton Monilähde-Videosoitin
+# Agent Player – Seamless Multi-Source Video Player
 
-**Agent Player** on selainpohjainen videosoitin ja soittolista-alusta, johon voit liittää videolinkkejä eri sivustoilta ja toistaa ne putkeen ilman manuaalista klikkailua – myös **Full Screen** (koko ruudun) tilassa!
+**Agent Player** is a modern, responsive, browser-based video player and playlist platform. Add video links from YouTube, Vimeo, direct video files, or HLS streams and play them continuously without manual clicking – seamlessly staying in **Full Screen** mode across video changes.
 
----
-
-## 🌟 Tärkeimmät ominaisuudet
-
-1. **Automaattinen toisto (Autoplay & Next)**:
-   - Kun painat *Toista soittolista*, videot toistuvat peräkkäin.
-   - Kun video päättyy, soitin siirtyy **automaattisesti seuraavaan videoon** ilman erillistä napinpainallusta.
-   - Valinnainen silmukointi (*Loop*): soittolistan päättyessä se voi alkaa automaattisesti alusta.
-
-2. **Koko ruudun tila (Full Screen)**:
-   - Fullscreen aktivoidaan koko soittimen ulkokuoreen (`#player-container`).
-   - Kun video vaihtuu esimerkiksi YouTube-videosta MP4-tiedostoon tai Vimeoon, **koko ruudun tila ei katkea**, vaan seuraava video alkaa suoraan koko ruudulla!
-   - Älykäs häipyvä HUD (Heads-Up Display): ohjauspainikkeet ja aikajana ilmestyvät kun liikutat hiirtä ja häipyvät automaattisesti taustalle.
-
-3. **Laaja tuki eri videolähteille**:
-   - 🔴 **YouTube**: Tavalliset videot, shorts-videot ja upotuslinkit (virallisen YouTube IFrame API:n kautta).
-   - 🔵 **Vimeo**: Vimeo-videot (virallisen Vimeo Player SDK:n kautta).
-   - 🟢 **Suorat videotiedostot**: `.mp4`, `.webm`, `.mov`, `.ogg` ym.
-   - 🟣 **HLS-striimit**: `.m3u8` suorat live- ja adaptiiviset striimit (Hls.js-tuella).
-
-4. **Käytettävyys & Soittolistan hallinta**:
-   - **Yksittäinen lisäys**: Liitä URL ja anna halutessasi oma otsikko.
-   - **Massalisäys (Bulk import)**: Liitä kymmeniä linkkejä kerralla (yksi per rivi).
-   - **Automaattinen tallennus**: Soittolista säilyy selaimen muistissa (`localStorage`), vaikka päivittäisit sivun.
-   - **Järjestele & Poista**: Siirrä videoita listalla ylös/alas tai poista tarpeettomat.
-   - **Tallenna / Lataa tiedostosta**: Voit viedä ja tuoda soittolistoja `.json`-muodossa.
-   - **Älykäs virheenohitus**: Jos jokin linkki on rikki tai estetty, soitin ilmoittaa siitä ja siirtyy automaattisesti seuraavaan 3 sekunnin kuluttua.
+Hosted live on GitHub Pages: **[https://hcbakeman.github.io/Player/](https://hcbakeman.github.io/Player/)**
 
 ---
 
-## 🚀 Käyttöönotto ja käynnistys
+## 🌟 Key Features
 
-### Helpoin tapa (Windows):
-Kaksoisnapsauta tiedostoa **[start.bat](file:///c:/Users/J/Documents/Agent-Player/start.bat)** kansiossa. Se:
-1. Käynnistää taustapalvelimen (`server.py`), joka purkaa suorat videostriimit sadoilta sivustoilta.
-2. Avaa automaattisesti selaimesi osoitteeseen **http://localhost:8080**.
+1. **Continuous Autoplay & Playlist Queue**:
+   - When you press *Play*, videos play sequentially.
+   - When a video ends, the player **automatically advances to the next video** without exiting fullscreen.
+   - Optional *Loop* mode repeats the playlist from the beginning.
 
-### Vaihtoehtoisesti terminaalissa:
-```powershell
-python server.py
-```
-ja siirry selaimessa osoitteeseen: [http://localhost:8080](http://localhost:8080)
+2. **Persistent Fullscreen Experience**:
+   - Fullscreen is applied to the master container (`#player-container`).
+   - When switching between different formats (e.g., YouTube to MP4 or Vimeo), **fullscreen never breaks**.
+   - Intelligent auto-hiding HUD (Heads-Up Display): controls and timeline smoothly appear on mouse movement and fade out during playback.
+
+3. **Multi-Source Video Engine**:
+   - 🔴 **YouTube**: Standard videos, Shorts, embed URLs, and YouTube Playlists (via official YouTube IFrame API).
+   - 🔵 **Vimeo**: Vimeo video links (via official Vimeo Player SDK).
+   - 🟢 **Direct Video Files**: `.mp4`, `.webm`, `.mov`, `.ogg`, etc.
+   - 🟣 **HLS Streams**: `.m3u8` live and adaptive bitrate streams (via Hls.js).
+
+4. **Playlist Management & Storage**:
+   - **Single URL**: Paste any supported link and optional title.
+   - **Bulk Import**: Paste multiple links (one per line) or YouTube playlist URLs to add all songs/videos at once.
+   - **Auto-Persistence**: Your playlist, playback volume, and settings are saved automatically in `localStorage`.
+   - **Export / Import**: Save and load your playlists anytime as `.json` files.
+   - **Smart Error Recovery**: If a video fails or is blocked, the player automatically skips to the next track after 3 seconds.
 
 ---
 
-## 🔞 Ulkopuoliset testisivustot (kuten xHamster, Pornhub ym.)
+## 🚀 Deployment & Usage
 
-Kun liität verkkosivun osoitteen (kuten `https://xhamster.com/videos/...`), kyseessä on kokonainen HTML-nettisivu, ei suora videotiedosto. 
+### 🌐 GitHub Pages (Recommended)
+This is a 100% static client-side web application running entirely in the browser:
+1. Enable **GitHub Pages** in your repository settings:
+   - Go to **Settings** > **Pages**.
+   - Under **Build and deployment**, select **Deploy from a branch**.
+   - Choose `main` branch and `/ (root)` folder, then click **Save**.
+2. Visit your live site at: **https://hcbakeman.github.io/Player/**
 
-`server.py` taustapalvelin:
-1. Käyttää sisäänrakennettua `yt-dlp` -moottoria.
-2. Etsii ja purkaa sekunnissa videon todellisen HLS- tai MP4-suoratoistolinkin (`.m3u8`), otsikon ja keston.
-3. Syöttää striimin suoraan soittimeen – **ilman mainoksia, ilman ponnahdusikkunoita ja ilman ikärajakyselyitä**!
-4. Koska soitin hallitsee suoraa striimiä, automaattinen seuraavaan siirtyminen ja koko ruudun tila toimivat 100 % luotettavasti.
+### 💻 Local Usage
+Simply open `index.html` in any modern web browser or serve locally with any static web server (e.g. `npx serve`, `python -m http.server 8080`, or Live Server).
 
 ---
 
-## ⌨️ Pikanäppäimet
+## ⌨️ Keyboard Shortcuts
 
-| Näppäin | Toiminto |
+| Key | Action |
 |---|---|
-| **Välilyönti (Space)** | Toista / Keskeytä (Play / Pause) |
-| **F** | Koko ruutu päälle / pois (Full Screen) |
-| **N** | Seuraava video (Next) |
-| **P** | Edellinen video (Previous) |
-| **M** | Mykistä / Poista mykistys (Mute) |
+| **Space** | Play / Pause |
+| **F** | Toggle Full Screen |
+| **N** | Next Video |
+| **P** | Previous Video |
+| **↑ (Up Arrow)** | Volume Up (+5%) |
+| **↓ (Down Arrow)** | Volume Down (-5%) |
+| **M** | Mute / Unmute |
 
 ---
 
-## 🛠️ Tekninen arkkitehtuuri
+## 🛠️ Architecture
 
-| Komponentti | Toteutus |
+| Component | Implementation |
 |---|---|
-| Käyttöliittymä | Semanttinen HTML5, moderni CSS3 (Glassmorphism Dark Theme, Flexbox & CSS Grid) |
-| Soitinrajapinnat | HTML5 `<video>`, YouTube IFrame API v2, Vimeo Player SDK, Hls.js |
-| Tapahtumaohjaus | `ended`, `onStateChange (0)`, `timeupdate`, Fullscreen API |
-| Muistinhallinta | Selaimen `localStorage` ja JSON-vienti/tuonti |
+| Frontend | Semantic HTML5, modern CSS3 (Glassmorphism dark theme, CSS grid & flexbox) |
+| Video Players | HTML5 `<video>`, YouTube IFrame API, Vimeo SDK, Hls.js |
+| State & Events | Event-driven architecture (`ended`, `onStateChange`, Fullscreen API, `localStorage`) |
+| Deployment | GitHub Pages (zero backend dependencies required) |
