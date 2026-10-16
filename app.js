@@ -672,25 +672,9 @@ async function playVideoAtIndex(index) {
 
     if (AppState.currentIndex !== currentReqIndex) return;
 
-    // Fallback: Virallinen YouTube IFrame -soitin
-    console.log('[FALLBACK] Siirrytään viralliseen YouTube IFrame -soittimeen');
-    DOM.hudBadge.textContent = 'YOUTUBE';
-    DOM.hudBadge.className = 'badge badge-yt';
-    activatePlayerElement('youtube');
-    if (AppState.ytReady && window.YT) {
-      initYouTubePlayer(item.sourceId);
-    } else {
-      // Odotetaan hetki jos API latautuu
-      const checkYt = setInterval(() => {
-        if (AppState.ytReady && window.YT) {
-          clearInterval(checkYt);
-          if (AppState.currentIndex === currentReqIndex) {
-            initYouTubePlayer(item.sourceId);
-          }
-        }
-      }, 200);
-      setTimeout(() => clearInterval(checkYt), 5000);
-    }
+    // Jos mainoksetonta striimiä ei saatu, ilmoitetaan virheestä eikä pakoteta mainoksia näyttävää upotusta
+    console.warn('[STREAM] Mainoksetonta striimiä ei saatu ladattua.');
+    handleVideoError('Videon suoratoisto epäonnistui ilman mainoksia.');
   } else if (item.type === 'vimeo') {
     activatePlayerElement('vimeo');
     initVimeoPlayer(item.sourceId);

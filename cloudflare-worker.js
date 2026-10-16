@@ -6,8 +6,8 @@
  * täysin ilman mainoksia suoraan selaimen omalla HTML5 <video> -elementillä
  * GitHub Pagesin kautta ilman paikallista server.py -palvelinta.
  * 
- * Sisältää sisäänrakennetun VisionOS Direct Innertube -purkajan, joka ohittaa
- * YouTuben bottisuojaukset ja tuottaa puhtaan HLS Master Streamin ilman mainoksia.
+ * Sisältää suoran VisionOS Innertube -purkajan virallisen visitor_id API:n kautta
+ * sekä HLS (.m3u8) soittolistojen dynaamisen proxauksen.
  * 
  * Ilmainen Cloudflare-tili: 100 000 pyyntöä / päivä (ei vaadi luottokorttia).
  */
@@ -18,6 +18,35 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type, Range, User-Agent',
   'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges'
 };
+
+const INNERTUBE_API_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8';
+
+async function getVisitorId() {
+  try {
+    const res = await fetch('https://www.youtube.com/youtubei/v1/visitor_id', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+      },
+      body: JSON.stringify({
+        context: {
+          client: {
+            clientName: 'WEB',
+            clientVersion: '2.20240826.01.00',
+            hl: 'en',
+            gl: 'US'
+          }
+        }
+      })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.responseContext?.visitorData || null;
+    }
+  } catch (_) {}
+  return null;
+}
 
 export default {
   async fetch(request, env, ctx) {
@@ -33,7 +62,7 @@ export default {
       return new Response(JSON.stringify({
         status: 'online',
         service: 'Agent Player Cloudflare Stream Worker',
-        features: ['visionos-direct', 'hls-proxy', 'invidious-fallback'],
+        features: ['visionos-visitor-api', 'hls-proxy', 'invidious-fallback'],
         timestamp: new Date().toISOString()
       }), {
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' }
@@ -129,89 +158,74 @@ export default {
       const workerOrigin = url.origin;
 
       // =========================================================================
-      // TIER 1: Suora YouTube VisionOS Innertube -purkaja (100% Ad-Free HLS Master)
+      // TIER 1: Suora YouTube VisionOS Innertube -purkaja visitor_id API:n avulla
       // =========================================================================
       try {
-        const watchRes = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
-          }
+        const visitorData = await getVisitorId();
+
+        const innertubeBody = {
+          context: {
+            client: {
+              clientName: 'VISIONOS',
+              clientVersion: '1.02',
+              deviceMake: 'Apple',
+              deviceModel: 'RealityDevice17,1',
+              userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15',
+              osName: 'visionOS',
+              osVersion: '26.5.23O471',
+              hl: 'en',
+              timeZone: 'UTC',
+              utcOffsetMinutes: 0
+            }
+          },
+          videoId: videoId,
+          playbackContext: {
+            contentPlaybackContext: {
+              html5Preference: 'HTML5_PREF_WANTS',
+              signatureTimestamp: 20739
+            }
+          },
+          contentCheckOk: true,
+          racyCheckOk: true
+        };
+
+        const headers = {
+          'Content-Type': 'application/json',
+          'X-Youtube-Client-Name': '101',
+          'X-Youtube-Client-Version': '1.02',
+          'Origin': 'https://www.youtube.com',
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15'
+        };
+        if (visitorData) {
+          headers['X-Goog-Visitor-Id'] = visitorData;
+        }
+
+        const playerRes = await fetch(`https://www.youtube.com/youtubei/v1/player?key=${INNERTUBE_API_KEY}&prettyPrint=false`, {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify(innertubeBody)
         });
 
-        if (watchRes.ok) {
-          const html = await watchRes.text();
-          const vMatch = html.match(/"VISITOR_DATA":\s*"([^"]+)"/);
-          const apiKeyMatch = html.match(/"INNERTUBE_API_KEY":\s*"([^"]+)"/);
+        if (playerRes.ok) {
+          const pData = await playerRes.json();
+          if (pData.playabilityStatus?.status === 'OK' && pData.streamingData?.hlsManifestUrl) {
+            const title = pData.videoDetails?.title || 'YouTube Video';
+            const duration = parseInt(pData.videoDetails?.lengthSeconds, 10) || 0;
+            const thumbnail = pData.videoDetails?.thumbnail?.thumbnails?.slice(-1)[0]?.url || `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+            const proxiedHls = `${workerOrigin}/stream?url=${encodeURIComponent(pData.streamingData.hlsManifestUrl)}`;
 
-          let title = 'YouTube Video';
-          const titleMatch = html.match(/<title>([^<]+) - YouTube<\/title>/) || html.match(/<title>([^<]+)<\/title>/);
-          if (titleMatch) title = titleMatch[1];
-
-          if (vMatch && apiKeyMatch) {
-            const visitorData = vMatch[1];
-            const apiKey = apiKeyMatch[1];
-
-            const innertubeBody = {
-              context: {
-                client: {
-                  clientName: 'VISIONOS',
-                  clientVersion: '1.02',
-                  deviceMake: 'Apple',
-                  deviceModel: 'RealityDevice17,1',
-                  userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15',
-                  osName: 'visionOS',
-                  osVersion: '26.5.23O471',
-                  hl: 'en',
-                  timeZone: 'UTC',
-                  utcOffsetMinutes: 0
-                }
-              },
+            return new Response(JSON.stringify({
+              success: true,
               videoId: videoId,
-              playbackContext: {
-                contentPlaybackContext: {
-                  html5Preference: 'HTML5_PREF_WANTS',
-                  signatureTimestamp: 20739
-                }
-              },
-              contentCheckOk: true,
-              racyCheckOk: true
-            };
-
-            const playerRes = await fetch(`https://www.youtube.com/youtubei/v1/player?key=${apiKey}&prettyPrint=false`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-Youtube-Client-Name': '101',
-                'X-Youtube-Client-Version': '1.02',
-                'Origin': 'https://www.youtube.com',
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15',
-                'X-Goog-Visitor-Id': visitorData
-              },
-              body: JSON.stringify(innertubeBody)
+              title: title,
+              duration: duration,
+              thumbnail: thumbnail,
+              streamUrl: proxiedHls,
+              type: 'hls',
+              source: 'youtube-visionos'
+            }), {
+              headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' }
             });
-
-            if (playerRes.ok) {
-              const pData = await playerRes.json();
-              if (pData.playabilityStatus?.status === 'OK' && pData.streamingData?.hlsManifestUrl) {
-                if (pData.videoDetails?.title) title = pData.videoDetails.title;
-                const duration = parseInt(pData.videoDetails?.lengthSeconds, 10) || 0;
-                const thumbnail = pData.videoDetails?.thumbnail?.thumbnails?.slice(-1)[0]?.url || `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
-                const proxiedHls = `${workerOrigin}/stream?url=${encodeURIComponent(pData.streamingData.hlsManifestUrl)}`;
-
-                return new Response(JSON.stringify({
-                  success: true,
-                  videoId: videoId,
-                  title: title,
-                  duration: duration,
-                  thumbnail: thumbnail,
-                  streamUrl: proxiedHls,
-                  type: 'hls',
-                  source: 'youtube-visionos'
-                }), {
-                  headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' }
-                });
-              }
-            }
           }
         }
       } catch (_) {
